@@ -1,46 +1,24 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as handPoseDetection from '@tensorflow-models/hand-pose-detection';
+// import * as handpose from '@tensorflow-models/handpose';
+import * as fp from 'fingerpose';
+import { Coords3D } from '@tensorflow-models/handpose/dist/pipeline';
 // import * as tf from '@tensorflow/tfjs-core';
 import '@tensorflow/tfjs-core';
-// import { MediaPipeHands } from '@tensorflow-models/hand-pose-detection';
 import '@mediapipe/hands';
 import Webcam from 'react-webcam';
 import '@tensorflow/tfjs-backend-webgl';
-// import { drawHand } from '../utilities';
 
 const HandPoseDetector: React.FC = () => {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gesture, setGesture] = useState<string | null>(null);
 
-  const determineGesture = (keypoints: handPoseDetection.Keypoint[]) => {
-    const thumbTip = keypoints.find(kp => kp.name === 'thumb_tip');
-    const indexFingerTip = keypoints.find(kp => kp.name === 'index_finger_tip');
-    const middleFingerTip = keypoints.find(kp => kp.name === 'middle_finger_tip');
-    const ringFingerTip = keypoints.find(kp => kp.name === 'ring_finger_tip');
-    const pinkyTip = keypoints.find(kp => kp.name === 'pinky_tip');
-
-    if (thumbTip && indexFingerTip && middleFingerTip && ringFingerTip && pinkyTip) {
-      const isRock = middleFingerTip.y > indexFingerTip.y &&
-                     ringFingerTip.y > indexFingerTip.y &&
-                     pinkyTip.y > indexFingerTip.y;
-      const isScissors = middleFingerTip.y < indexFingerTip.y &&
-                         ringFingerTip.y < pinkyTip.y &&
-                         thumbTip.y > indexFingerTip.y;
-      const isPaper = Math.abs(indexFingerTip.y - pinkyTip.y) < 10 &&
-                      Math.abs(thumbTip.y - ringFingerTip.y) < 10;
-
-      if (isRock) return 'Камень';
-      if (isScissors) return 'Ножницы';
-      if (isPaper) return 'Бумага';
-    }
-
-    return 'Неопределено';
-  };
-
   const drawKeypoints = (keypoints: handPoseDetection.Keypoint[], ctx: CanvasRenderingContext2D) => {
+  // const drawKeypoints = (keypoints: number[][], ctx: CanvasRenderingContext2D) => {
     keypoints.forEach(keypoint => {
       const { x, y } = keypoint;
+    // keypoints.forEach(([x, y]) => {
       ctx.beginPath();
       ctx.arc(x, y, 5, 0, 2 * Math.PI);
       ctx.fillStyle = "red";
@@ -49,6 +27,7 @@ const HandPoseDetector: React.FC = () => {
   };
 
   const detectHand = useCallback(async (detector: handPoseDetection.HandDetector) => {
+    // const detectHand = useCallback(async (model: handpose.HandPose) => {
     if (
       webcamRef.current &&
       webcamRef.current.video &&
@@ -58,29 +37,99 @@ const HandPoseDetector: React.FC = () => {
       const videoWidth = video.videoWidth;
       const videoHeight = video.videoHeight;
 
-      // Настраиваем размеры канваса
       const canvas = canvasRef.current!;
       canvas.width = videoWidth;
       canvas.height = videoHeight;
 
       const ctx = canvas.getContext("2d")!;
       ctx.clearRect(0, 0, videoWidth, videoHeight);
+      // const predictions = await model.estimateHands(video);
+
     //   const estimateConfig = {staticImageMode: true}
       const estimateConfig = {flipHorizontal: false};
       const hands = await detector.estimateHands(video, estimateConfig);
+      // const hands = await detector.estimateHands(video, true);
+
+      // console.log('Hands detected:', hands);
 
       if (hands.length > 0) {
         const hand = hands[0];
 
-        console.log(hand);
-        const gesture = determineGesture(hand.keypoints);
-        setGesture(gesture);
+        // const keypoints3D = hand.landmarks.map(([x, y, z]) => ({
+        //   x,
+        //   y,
+        //   z,
+        //   // score: 1.0, // Задаем значение score, если необходимо
+        // }));
+
+        // setGesture(gesture);
         drawKeypoints(hand.keypoints, ctx);
 
-        // if (canvasRef.current) {
-        //   const ctx = canvasRef.current.getContext("2d");
-        //   drawHand(hand, ctx);
-        // }
+        if (hand.keypoints3D) {
+
+          // const keypoints3D = hand.keypoints3D?.map(({x, y, z = 0}) => ({
+          //   x,
+          //   y,
+          //   z,
+          // })) || [];
+
+          const landmark = hand.keypoints3D.map(
+            (value) => [
+              value.x,
+              value.y,
+              value.z,
+            ]
+          );
+
+          // console.log('Keypoints3D:', hand.keypoints3D);
+          console.log('landmark:', landmark);
+
+          const gestureEstimator = new fp.GestureEstimator([
+            // fp.Gestures.VictoryGesture,
+            fp.Gestures.ThumbsUpGesture,
+            rockGesture,
+            scissorsGesture,
+            paperGesture,
+          ]);
+
+          console.log('Gesture Estimator Initialized', gestureEstimator);
+  
+          // const estimatedGestures = gestureEstimator.estimate(keypoints3D, 9);
+          // if (keypoints3D.every(kp => kp.z !== undefined)) {
+            const estimatedGestures = await gestureEstimator.estimate(landmark, 9);
+
+            console.log('Estimated Gestures:', estimatedGestures);
+
+            if (estimatedGestures.gestures.length > 0) {
+              const maxConfidenceGesture = estimatedGestures.gestures.reduce((prev, current) =>
+                prev.score > current.score ? prev : current
+              );
+              console.log('Max Confidence Gesture:', maxConfidenceGesture);
+              
+              // setGesture(maxConfidenceGesture.name);
+              switch (maxConfidenceGesture.name) {
+                case 'thumbs_up':
+                  setGesture('👍');
+                  break;
+                case 'rock':
+                  setGesture('✊');
+                  break;
+                case 'scissors':
+                  setGesture('✌');
+                  break;
+                case 'paper':
+                  setGesture('✋');
+                  break;
+                default:
+                  '?'
+              }
+            } else {
+              console.log('No gestures recognized');
+            }
+          // } else {
+          //   console.warn("Incomplete keypoints data.");
+          // }
+        }
       }
     }
 
@@ -95,18 +144,51 @@ const HandPoseDetector: React.FC = () => {
         // runtime: 'tfjs' as const,
         solutionPath: `https://cdn.jsdelivr.net/npm/@mediapipe/hands`,
         // solutionPath: `./node_modules/@mediapipe/hands`,
-        // wasmPath: `https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.wasm`,
-        // wasmPath: `https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.wasm`,
-        maxHands: 2
+        maxHands: 1
       };
       const detector = await handPoseDetection.createDetector(model, detectorConfig);
-    //   setInterval(() => {
-        detectHand(detector);
-    //   }, 100)
+      detectHand(detector);
     };
 
     runHandPoseDetection();
   }, [detectHand]);
+
+  // useEffect(() => {
+  //   const runHandPoseDetection = async () => {
+  //     const model = await handpose.load();
+  //     detectHand(model);
+  //   };
+
+  //   runHandPoseDetection();
+  // }, [detectHand]);
+
+  // Определение пользовательских жестов для Камень, Ножницы и Бумага
+  const rockGesture = new fp.GestureDescription('rock');
+  // Зажатые пальцы для Камня
+  rockGesture.addCurl(fp.Finger.Thumb, fp.FingerCurl.HalfCurl, 1.0);
+  rockGesture.addCurl(fp.Finger.Thumb, fp.FingerCurl.NoCurl, 1.0);
+  rockGesture.addCurl(fp.Finger.Index, fp.FingerCurl.FullCurl, 1.0);
+  rockGesture.addCurl(fp.Finger.Middle, fp.FingerCurl.FullCurl, 1.0);
+  rockGesture.addCurl(fp.Finger.Ring, fp.FingerCurl.FullCurl, 1.0);
+  rockGesture.addCurl(fp.Finger.Pinky, fp.FingerCurl.FullCurl, 1.0);
+
+  const scissorsGesture = new fp.GestureDescription('scissors');
+  // Сжатый кулак с выпрямленными указательным и средним пальцами для Ножниц
+  // scissorsGesture.addCurl(fp.Finger.Thumb, fp.FingerCurl.FullCurl, 1.0);
+  scissorsGesture.addCurl(fp.Finger.Index, fp.FingerCurl.NoCurl, 1.0);
+  scissorsGesture.addCurl(fp.Finger.Middle, fp.FingerCurl.NoCurl, 1.0);
+  scissorsGesture.addCurl(fp.Finger.Ring, fp.FingerCurl.FullCurl, 1.0);
+  scissorsGesture.addCurl(fp.Finger.Ring, fp.FingerCurl.HalfCurl, 1.0);
+  scissorsGesture.addCurl(fp.Finger.Pinky, fp.FingerCurl.FullCurl, 1.0);
+  scissorsGesture.addCurl(fp.Finger.Pinky, fp.FingerCurl.HalfCurl, 1.0);
+
+  const paperGesture = new fp.GestureDescription('paper');
+  // Все пальцы выпрямлены для Бумаги
+  paperGesture.addCurl(fp.Finger.Thumb, fp.FingerCurl.NoCurl, 1.0);
+  paperGesture.addCurl(fp.Finger.Index, fp.FingerCurl.NoCurl, 1.0);
+  paperGesture.addCurl(fp.Finger.Middle, fp.FingerCurl.NoCurl, 1.0);
+  paperGesture.addCurl(fp.Finger.Ring, fp.FingerCurl.NoCurl, 1.0);
+  paperGesture.addCurl(fp.Finger.Pinky, fp.FingerCurl.NoCurl, 1.0);
 
   return (
     <div>
@@ -133,7 +215,7 @@ const HandPoseDetector: React.FC = () => {
         }}
       />
 
-      <div style={{ position: 'relative', top: 500 }}>Распознанный жест: {gesture}</div>
+      <div style={{ position: 'relative', top: 500, fontSize: 35 }}>Распознанный жест: {gesture}</div>
     </div>
   );
 };
